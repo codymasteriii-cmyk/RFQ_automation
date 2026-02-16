@@ -10,6 +10,7 @@ dist/
 .DS_Store
 n8n/
 Video/
+*.docx
 
 # Logs
 *.log
