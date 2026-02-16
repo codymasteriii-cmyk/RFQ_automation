@@ -1,0 +1,4354 @@
+{
+  "name": "Process Automation Demo",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1152,
+        -592
+      ],
+      "id": "52217fa7-18ef-432f-9fea-60dcdbadd9a4",
+      "name": "When chat message received",
+      "webhookId": "75124893-f413-4bab-a99c-7e407c9aa0cd"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "sender": "*@gmail.com"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1008,
+        640
+      ],
+      "id": "f312d725-1ae7-45ac-bc30-8a98f03bfce8",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Step 1.1. Email response follow-up workflow\n1.1.1. A scheduled trigger node runs to check what process name and status exists in the \"process_demo\". If no process name exists or status is not \"activated\", the scheduler does nothing\n1.1.2. Otherwise the scheduler gets activated to monitor if any Step1 Jira tickets are still with AWAITING RESPONSE status\n1.1.3. If any Step1 ticket is AWAITING RESPONSE, check between last chase date and current schedule triggered time, whether I have received any new email from the sender (last chase date, sender email are stored in the ticket)\n1.1.4. If not, it generates a chaser email using AI. If the expected delivery date (from Step1 ticket) is passed, it changes the tone to be more demanding in the chaser email and notify me of the miss. Otherwise it uses a softer tone.\n1.1.5. After the chaser email, update the Jira ticket's last chase date for next scheduled trigger run\n",
+        "height": 256,
+        "width": 784
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1216,
+        -240
+      ],
+      "typeVersion": 1,
+      "id": "66dde02f-b334-46e9-b656-e5220cf49625",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "responseMode": "responseNode",
+        "limitWaitTime": true,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "review"
+        }
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        624
+      ],
+      "id": "d21f91e0-b4a0-4fb6-8674-24856735332f",
+      "name": "Wait",
+      "webhookId": "7b4ff110-8284-4e90-8030-76368a33b4dd"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the sender string from the Gmail Trigger\nconst sender = $('Gmail Trigger').first().json.from.value[0].address;\nconst emailText = $('Gmail Trigger').first().json.text;\nconst subject = $('Gmail Trigger').first().json.subject;\nconst emailHTML = $('Gmail Trigger').first().json.html;\nconst process_name = $('Extract Process Name from Email').first().json.result\n\n// 3. Setup results and a tracker\nlet results = [];\n\n// 4. Loop through every item passed into this node (the Jira data)\nfor (const item of $input.all()) {\n  const recipientEmail = item.json.recipient_email;\n  \n  if (recipientEmail && recipientEmail.toLowerCase() === sender) {\n    results.push({\n      json: {\n        key: item.json.key,\n        external_email: recipientEmail,\n        emailText: emailText,\n        subject: subject,\n        emailHTML: emailHTML,\n        process_name: process_name          \n      }\n    });\n  }\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        640
+      ],
+      "id": "99eaea93-fd9b-46e3-930e-d7f2c9120b46",
+      "name": "Find Pending Sender's Ticket"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-pro",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-pro"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Analyze the following email body from a process participant.\nYour goal is to determine if the workflow should STOP (Wait for user) or PROCEED (Trigger sign-off).\n\n### INPUT EMAIL:\n\"{{ $json.emailText }}\"\n\n### CLASSIFICATION RULES:\n\n**CATEGORY 1: SUBMISSION ({ \"type\": \"submission\", \"key\": \"{{ $json.key }}\", \"external_email\": \"{{ $json.external_email }}\" })**\nSelect this if the sender is **delivering** the requested items. Look for ANY of these indicators:\n- Phrases indicating completion (e.g., \"Done\", \"Here you go\", \"As requested\", \"Please see attached\", \"Provided below\").\n- Reference to attachments or links (e.g., \"I've attached the file\", \"Uploaded to the drive\").\n- Confirmation that the task is finished (e.g., \"This completes the request\").\n\n**CATEGORY 2: CONTINUATION ({ \"type\": \"continuation\", \"key\": \"{{ $json.key }}\", \"external_email\": \"{{ $json.external_email }}\" })**\nSelect this if the sender is **not** delivering the final item yet. Includes:\n- Status updates (\"Almost done\", \"Working on it\").\n- Clarifying questions (\"Which format do you prefer?\").\n- Delay notifications (\"I will send it tomorrow\").\n- Partial delivery where they explicitly say more is coming (\"Here is part 1, part 2 is coming later\").\n\n### OUTPUT INSTRUCTIONS:\n- Analyze the *intent* of the message, not just the keywords.\n- Output ONLY valid JSON.\n- Example: { \"type\": \"submission\", \"key\": \"MAN-10\", \"external_email\": \"abc@gmail.com\" }"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        208,
+        480
+      ],
+      "id": "c7c0d7d5-7751-49c6-9815-c9f195cc28cf",
+      "name": "Check if Email is a Submission",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Loop through every JSON entry coming from your intermediate node\nfor (let item of $input.all()) {\n  \n  // Grab the hidden binary storage from the trigger\n  const triggerBinary = $('Gmail Trigger').first().binary;\n  \n  // Inject that binary storage into the current item\n  // This makes 'attachment_0' available to the next node\n  item.binary = triggerBinary;\n}\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        624
+      ],
+      "id": "692ced28-24dc-4fe7-86b1-f4a4af8f887e",
+      "name": "Bring Gmail Attachment Fwd"
+    },
+    {
+      "parameters": {
+        "sendTo": "codymasteriii@gmail.com",
+        "subject": "={{ \"Fwd: \" +  $('Find Pending Sender\\'s Ticket').item.json.subject}}",
+        "message": "=<p>AI has reviewed the material from <{{ $('Find Pending Sender\\'s Ticket').item.json.external_email }}>.</p>\n<p><strong>It is ready for your final decision to:</p>\n<div style=\"margin-top: 20px;\">\n<a href=\"{{ $execution.resumeUrl }}/review?action=approve&key={{ JSON.parse($json.content.parts[0].text).key }}&external_email={{ JSON.parse($json.content.parts[0].text).external_email }}\" style=\"background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-right: 10px;\">Approve & Archive</a><a href=\"{{ $execution.resumeUrl }}/review?action=reject\" style=\"background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;\">Reject</a>\n</div>\n<br><br>\n<p><strong>Original email below:</p>\n<p>{{ $('Find Pending Sender\\'s Ticket').item.json.emailHTML }}</p>\n",
+        "options": {
+          "attachmentsUi": {
+            "attachmentsBinary": [
+              {
+                "property": "attachment_0"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        800,
+        624
+      ],
+      "id": "1e248e8c-f108-44bd-a8ab-e3f3ec5119dd",
+      "name": "Email Me to Review",
+      "webhookId": "ff39ae2e-3a44-4ebf-bdef-8ec8f8083c8e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "parent_filter": "={{ $json.result }}",
+            "child_filter": "Step1",
+            "ticket_status": "AWAITING RESPONSE"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -80,
+        640
+      ],
+      "id": "22745f6e-bea3-4ede-b2a8-230f320fb654",
+      "name": "Get Pending Response Tickets for Process"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step2",
+            "ticket_status": "TO DO",
+            "parent_filter": "={{ $json.parent_filter }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1504,
+        496
+      ],
+      "id": "d5bfd730-d315-4dd3-b734-cc42d60b14ac",
+      "name": "Get Pending Archive Tickets for Process"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8ed0ef70-e8f4-44d5-97f3-57e67724c0f2",
+              "name": "parent_filter",
+              "value": "={{ $('Find Pending Sender\\'s Ticket').item.json.process_name }}",
+              "type": "string"
+            },
+            {
+              "id": "7220cd14-d734-49c8-9273-641930ac610e",
+              "name": "email_body",
+              "value": "={{ $('Find Pending Sender\\'s Ticket').item.json.emailHTML }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1328,
+        496
+      ],
+      "id": "c6b11780-e1d3-42b5-8e4a-6b4aa71bd309",
+      "name": "Bring Process &Email Fwd"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the target email from the 'If' node\nconst targetEmail = $('Submission Approved?').first().json.query.external_email;\n// Grab the hidden binary storage from the trigger\nconst triggerBinary = $('Gmail Trigger').first().binary;\nconst emailBody = $('Bring Process &Email Fwd').first().json.email_body;\nconst results = [];\n\n// Loop through all incoming items\nfor (const item of $input.all()) {\n  // Access the JSON data of the current item\n  const data = item.json;\n\n  // Check for the match\n  if (data.recipient_email === targetEmail) {\n    results.push({\n      json: {\n        key: data.key,\n        archive_folder: data.archive_folder,\n        summary: data.summary,\n        email_body: emailBody\n      },\n      // This re-attaches 'attachment_0' etc. to the filtered item\n      binary: triggerBinary\n    });\n  }\n}\n\n// Return the list of matched items (or an empty array if none found)\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        496
+      ],
+      "id": "3cf0a773-9405-45a6-8b40-6ddd62fd0f55",
+      "name": "Get Key-Folder-Attachment"
+    },
+    {
+      "parameters": {
+        "html_content": "={{ $json.email_body }}",
+        "output_format": "file",
+        "output_filename": "={{ $json.summary.replace(/[()]/g, '').replace(/\\s+/g, '_') }}"
+      },
+      "type": "n8n-nodes-htmlcsstopdf.htmlcsstopdf",
+      "typeVersion": 1,
+      "position": [
+        1792,
+        400
+      ],
+      "id": "21d3565c-35f7-4aca-9dd0-796a58ed9eb4",
+      "name": "HTML to PDF",
+      "credentials": {
+        "htmlcsstopdfApi": {
+          "id": "M5bFtkmr2TzuKgkp",
+          "name": "HTML to PDF account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "attachment_0",
+        "name": "={{ $binary.attachment_0.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.archive_folder }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": true
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1872,
+        592
+      ],
+      "id": "ee1cb47f-43aa-4337-8da2-0ff74a3529be",
+      "name": "Upload Attachment",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "={{ $binary.data.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Get Key-Folder-Attachment').item.json.archive_folder }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": true
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1952,
+        400
+      ],
+      "id": "aa63c558-5473-4688-8902-bc5cd5109f2f",
+      "name": "Upload Email",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "clashHandling": {
+            "values": {
+              "resolveClash": "addSuffix"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2064,
+        496
+      ],
+      "id": "d4cd4331-8fd9-463c-bf4c-44443b3a5c23",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e7e8071-bb6d-4df7-9b4e-05d6dd4d3adf",
+              "name": "jira_ticket",
+              "value": "={{ $('Submission Approved?').item.json.query.key }} is updated to Done",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2416,
+        784
+      ],
+      "id": "8e9144cc-23f1-4d06-a68e-3c12352f078e",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e8746511-9722-4750-8b59-eba702de0c89",
+              "name": "jira_ticket",
+              "value": "={{ $('Get Key-Folder-Attachment').item.json.key }} is updated to Done",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2416,
+        496
+      ],
+      "id": "6feb5e32-6c8c-4657-98f2-ed3a4f3eeba0",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {
+          "clashHandling": {
+            "values": {
+              "resolveClash": "addSuffix"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2544,
+        640
+      ],
+      "id": "9ec83859-13ef-4101-9b08-8fcc6c3bd327",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Pending Response Review and Archive Completed</h1>\n    <h2>Jira Status Update</h2>\n    <p>{{ $json.jira_ticket_1 }}</p>\n    <p>{{ $json.jira_ticket_2 }}</p>\n    <h2>Google Drive File Uploaded</h2>\n    <p>{{ $('Merge').item.json.name_1 }}</p>\n    <p>{{ $('Merge').item.json.name_2 }}</p>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2704,
+        640
+      ],
+      "id": "3f2dacf1-72dc-4c09-9433-98d7afea08a2",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Pending Response Review Rejected</h1>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1328,
+        832
+      ],
+      "id": "206ec64f-56f7-469d-af3a-9e406ea36554",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1168,
+        1360
+      ],
+      "id": "767a5fdf-673f-4d9d-8e81-7e87c6100b9e",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-pro",
+        "options": {
+          "temperature": 0.1,
+          "topP": 0.4
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -992,
+        -400
+      ],
+      "id": "d8046533-a774-402e-a4ca-df76a7e4b1b1",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "condition": "neq",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -992,
+        1360
+      ],
+      "id": "f3a216a6-aae2-4a4b-ac16-515315cfe5dd",
+      "name": "Find Active Process",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the items coming from the previous node\nconst items = $input.all();\n\nconst data = items[0].json;\n  \nreturn {\n  process_name: data.curr_process,\n  status: data.curr_process_status\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -816,
+        1360
+      ],
+      "id": "00a4b60e-709c-4c43-a819-0092ba60ded1",
+      "name": "Parse Process & Status"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "65def62e-8dd7-4529-9656-d267d27790e6",
+              "leftValue": "={{ JSON.parse($json.content.parts[0].text).type }}",
+              "rightValue": "submission",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        640
+      ],
+      "id": "148151cf-378f-4203-824e-cf64cce95b45",
+      "name": "Is Submission?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d3baf30c-d550-460d-9ec8-020e47d00d7d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "activated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -640,
+        1360
+      ],
+      "id": "be55688a-b0ee-4d2c-9e70-715f4075c319",
+      "name": "Process Active?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step2",
+            "parent_filter": "={{ $json.process_name }}",
+            "ticket_status": "TO DO,DONE"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -528,
+        1216
+      ],
+      "id": "4d67f305-a265-4c8d-bc13-13f9e99f1353",
+      "name": "Find Step2 Tickets"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -48,
+        1216
+      ],
+      "id": "19e83dd3-2ecf-4ee1-a052-c34aa89ba480",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        128,
+        1216
+      ],
+      "id": "ca6b6c3e-d515-42be-912f-8cae5b1b6ae4",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "condition": "neq",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -832,
+        640
+      ],
+      "id": "b3f23a71-a44b-401f-8556-35edd4e42e74",
+      "name": "Find Active Process1",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the items coming from the previous node\nconst items = $input.all();\n\nconst data = items[0].json;\n  \nreturn {\n  process_name: data.curr_process,\n  status: data.curr_process_status\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        640
+      ],
+      "id": "933519a4-4bae-4166-a2d1-e44dbe665847",
+      "name": "Parse Process & Status1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d3baf30c-d550-460d-9ec8-020e47d00d7d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "activated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -480,
+        640
+      ],
+      "id": "6240db54-943c-4b70-8c11-c213b9e94d5a",
+      "name": "Process Active?1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the pattern from the first item's Subject field\nconst subject = $('Gmail Trigger').first().json.subject;\n\n// Regex matches \"Q\" followed by a digit and then \" Process\"\nconst regex = /Q\\d Process/;\nconst match = subject.match(regex);\n\n// Return the result as a new n8n item\nreturn [{\n  json: {\n    result: match ? match[0] : \"No match found\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        480
+      ],
+      "id": "cbf99a65-3620-45b7-99b7-9a36072bd090",
+      "name": "Extract Process Name from Email"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "768522e3-a6a5-4ac5-9c2d-a94044757e56",
+              "leftValue": "={{ $json.result }}",
+              "rightValue": "={{ $('Process Active?1').item.json.process_name }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -192,
+        480
+      ],
+      "id": "b32e5cd2-4424-4807-901f-ee307a47f3bd",
+      "name": "Process in Email Match Active Process?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Access all items from the previous Jira node\nconst items = $input.all();\n\n// Use .every() to check if all records have the status \"Done\"\nconst allDone = items.every(item => item.json.status === \"Done\");\n\nif (allDone) {\n  return [{\n    status: \"Done\",\n    // Grab the folder from the first item since they are all the same\n    archive_folder: items[0].json.archive_folder\n  }];\n}\n\nreturn [];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -368,
+        1216
+      ],
+      "id": "f114fb60-7766-4dbe-9222-faaf3b9c74bc",
+      "name": "Check Step2 All Done"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "mimeType = \"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\"",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "__rl": true,
+            "value": "My Drive",
+            "mode": "list",
+            "cachedResultName": "My Drive",
+            "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.archive_folder }}",
+            "mode": "id"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -208,
+        1216
+      ],
+      "id": "4417e0c3-c95e-40e6-98b6-4dbf4315ca74",
+      "name": "Find Step2 Excels Archived",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the process name from your very first node\nconst processName = $('Parse Process & Status').first().json.process_name;\n\n// 2. Get all items from the current input (the spreadsheet data)\nconst items = $input.all();\nconst offersList = [];\nlet currentEntry = null;\n\nfor (const item of items) {\n  const row = item.json;\n\n  // Detect a new Company block\n  if (row.Company) {\n    if (currentEntry) {\n      offersList.push(currentEntry);\n    }\n\n    currentEntry = {\n      company: row.Company,\n      offer: [\n        {\n          \"Product\": row.Product,\n          \"Price\": row.Price\n        }\n      ]\n    };\n  }\n\n  // Add functionality to the active company\n  if (currentEntry && row[\"Functionality #\"]) {\n    currentEntry.offer.push({\n      \"Functionality #\": row[\"Functionality #\"],\n      \"Functionality Description\": row[\"Functionality Description\"]\n    });\n  }\n}\n\n// Push the final company found\nif (currentEntry) {\n  offersList.push(currentEntry);\n}\n\n// 3. Return the final structure\nreturn {\n  curr_process: processName,\n  offers: offersList\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        1216
+      ],
+      "id": "a11c90be-9080-4bd8-91a8-59c0b84f934b",
+      "name": "Parse Company Offers"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "curr_process",
+              "keyValue": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('conditions0_Value', ``, 'string') }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "curr_process_status": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('curr_process_status', ``, 'string') }}",
+            "curr_process": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('curr_process', ``, 'string') }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "curr_process",
+              "displayName": "curr_process",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "curr_process_status",
+              "displayName": "curr_process_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTableTool",
+      "typeVersion": 1,
+      "position": [
+        -848,
+        -400
+      ],
+      "id": "973c3452-fa27-4899-aaf3-e9775f7900a4",
+      "name": "Activate Process"
+    },
+    {
+      "parameters": {
+        "sendTo": "codymasteriii@gmail.com",
+        "subject": "={{ $('Parse Company Offers').item.json.curr_process }} Supplier Offer Analysis",
+        "message": "=<p>AI has reviewed the materials from suppliers for {{ $('Parse Company Offers').item.json.curr_process }}.</p>\n<p><strong>It is ready for your final decision to:</p>\n<div style=\"margin-top: 20px;\">\n<a href=\"{{ $execution.resumeUrl }}/review?action=approve&process={{ $('Parse Company Offers').item.json.curr_process }}\" style=\"background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-right: 10px;\">Approve & Archive</a><a href=\"{{ $execution.resumeUrl }}/review?action=reject\" style=\"background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;\">Reject</a>\n</div>\n<br><br>\n<p>\n{{ $('Set HTML & File Input').item.json.html_input }}\n</p>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        976,
+        1216
+      ],
+      "id": "0a9d2426-4f61-4872-95ac-3f91bbd5407b",
+      "name": "Send a message",
+      "webhookId": "a2589e9e-2c20-43f1-a864-03496e006953",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "responseMode": "responseNode",
+        "limitWaitTime": true,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "review"
+        }
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1136,
+        1216
+      ],
+      "id": "a6903c26-fba3-42bb-83fa-f95847e3f7a1",
+      "name": "Wait1",
+      "webhookId": "7b4ff110-8284-4e90-8030-76368a33b4dd"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step3",
+            "ticket_status": "TO DO",
+            "parent_filter": "={{ $json.query.process }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1440,
+        1072
+      ],
+      "id": "abba1a3b-1095-46ad-9045-1862417564fb",
+      "name": "Get Step3 Ticket"
+    },
+    {
+      "parameters": {
+        "name": "={{ $binary.data.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Carry Over Fields').item.json.archive_folder }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": true
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        1072
+      ],
+      "id": "1a6091b0-535d-44e1-bc21-8d76ba6fd3c0",
+      "name": "Upload Offer Proposal",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "html_content": "={{ $json.html_input }}",
+        "output_format": "file",
+        "output_filename": "={{ $json.file_name }}"
+      },
+      "type": "n8n-nodes-htmlcsstopdf.htmlcsstopdf",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        1072
+      ],
+      "id": "ee9ff034-c142-402a-904a-7cc6a8b5b244",
+      "name": "HTML to PDF1",
+      "credentials": {
+        "htmlcsstopdfApi": {
+          "id": "M5bFtkmr2TzuKgkp",
+          "name": "HTML to PDF account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Get Key-Folder-Attachment').item.json.key }}",
+        "updateFields": {
+          "statusId": {
+            "__rl": true,
+            "value": "41",
+            "mode": "list",
+            "cachedResultName": "Done"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        2240,
+        496
+      ],
+      "id": "6285bf4b-99e6-41c1-8ffa-be6d55c1de9e",
+      "name": "Complete Step2 Ticket",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Carry Over Fields').item.json.key }}",
+        "updateFields": {
+          "statusId": {
+            "__rl": true,
+            "value": "41",
+            "mode": "list",
+            "cachedResultName": "Done"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        1072
+      ],
+      "id": "08c0b62f-cd17-4b07-81df-44aa4d1c4733",
+      "name": "Complete Step3 Ticket",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "90c018ad-ea71-457b-9cd8-e5d452ae837a",
+              "name": "html_input",
+              "value": "={{ $json.content.parts[0].text }}",
+              "type": "string"
+            },
+            {
+              "id": "03ef5bd9-3a7a-4fd9-818e-6d18cca12352",
+              "name": "file_name",
+              "value": "={{ $('Parse Company Offers').item.json.curr_process.replace(/\\s+/g, '_') }}_Offer_Proposal",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        656,
+        1216
+      ],
+      "id": "99d53a79-fbf8-426e-8b03-c942cc508dbe",
+      "name": "Set HTML & File Input"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6794667c-ce99-471b-80ab-68a0cdeeeef5",
+              "name": "archive_folder",
+              "value": "={{ $json.archive_folder }}",
+              "type": "string"
+            },
+            {
+              "id": "e36c7386-2bc2-45cb-8fec-5ed3dfb32226",
+              "name": "key",
+              "value": "={{ $json.key }}",
+              "type": "string"
+            },
+            {
+              "id": "92786e6a-55da-401c-b720-b9e2cca8d2fd",
+              "name": "html_input",
+              "value": "={{ $('Set HTML & File Input').item.json.html_input }}",
+              "type": "string"
+            },
+            {
+              "id": "1e0c51de-7f5a-4663-acef-354b653d2071",
+              "name": "file_name",
+              "value": "={{ $('Set HTML & File Input').item.json.file_name }}",
+              "type": "string"
+            },
+            {
+              "id": "ec1b7984-3b5e-435f-8cf9-a60b01c18db3",
+              "name": "curr_process",
+              "value": "={{ $('Wait1').item.json.query.process }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1600,
+        1072
+      ],
+      "id": "0c7b818a-10bb-4717-91f7-04f74ff9b4e6",
+      "name": "Carry Over Fields"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-pro",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-pro"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={\n  \"process_context\": \"{{ $json.curr_process }}\",\n  \"offers_data\": {{ JSON.stringify($json.offers) }}\n}"
+            }
+          ]
+        },
+        "options": {
+          "systemMessage": "## Role\nYou are a precision Data Analyst. You convert raw product data into a formatted HTML comparison report. \n\n## Variables\nYou will receive two data points in the User Message:\n1. **'process_context'**: The name of the current evaluation cycle.\n2. **'offers_data'**: A JSON array of company product offers.\n\n## Analysis Logic\n1. **Quantity Assessment**: Count the number of \"Functionality Description\" items in each company's 'offer' array.\n2. **Efficiency Calculation**: Calculate the **Cost per Functionality** (Price divided by Number of Functionalities) for each offer.\n3. **Determine the \"Best Value\"**: \n   - The winner is the company with the **lowest Cost per Functionality**.\n   - **Tie-breaker**: If the Cost per Functionality is equal, the offer with the higher total number of functionalities wins.\n\n## Strict Output Rules\n- Output MUST be raw HTML ONLY. \n- No markdown formatting (like ```html), no preamble, and no conversational text.\n- The response must start with <h1> and end with </table>.\n\n## HTML Template\n<h1>Analysis Result: [USE process_context HERE]</h1>\n<p>The best offer for product <strong>[PRODUCT NAME]</strong> is from <strong>[WINNING COMPANY]</strong>.</p>\n<p><strong>Reasoning:</strong> [Explain the win by highlighting that this company offers the best value-to-cost ratio (lowest cost per functionality) compared to the others.]</p>\n<table border=\"1\" style=\"border-collapse: collapse; width: 100%;\">\n  <thead>\n    <tr style=\"background-color: #f2f2f2;\">\n      <th>Company</th>\n      <th>Price</th>\n      <th>Functionalities (Count)</th>\n      <th>Cost per Functionality</th>\n    </tr>\n  </thead>\n  <tbody>\n    [Iterate for all companies in offers_data. Apply style=\"background-color: #e6ffed;\" to the row of the winning company.]\n  </tbody>\n</table>",
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        416,
+        1088
+      ],
+      "id": "6054b31d-b046-4ab9-bdef-c3e154887bfb",
+      "name": "Perform Offer Comparison",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Proposed Offer Analysis Rejected</h1>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1424,
+        1360
+      ],
+      "id": "ef6a41db-0bc0-4ad8-a8aa-256be621142d",
+      "name": "Respond to Webhook2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c8af0d2f-7e6b-479f-a72c-2da06a2665fb",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        624
+      ],
+      "id": "c6b2c9c5-0f8e-4d10-afd6-48b345d9023b",
+      "name": "Submission Approved?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c8af0d2f-7e6b-479f-a72c-2da06a2665fb",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        1216
+      ],
+      "id": "06bf6cc5-8f4a-4d27-9ea2-1564663d7a97",
+      "name": "Best Offer Approved?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step4",
+            "ticket_status": "TO DO",
+            "parent_filter": "={{ $('Carry Over Fields').item.json.curr_process }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        2672,
+        1216
+      ],
+      "id": "58ac2632-075e-4268-a027-72d79bec67b9",
+      "name": "Get Step4 Ticket"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Proposed offer analysis approved and meetings will be scheduled to review the proposal</h1>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2560,
+        1072
+      ],
+      "id": "2f45a7e1-9b04-4ac8-883d-721f8f31303b",
+      "name": "Respond to Webhook3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the email list from the previous node\nconst emailString = $input.first().json.recipient_email;\n\n// 2. Parse the string into an array of \"id\" objects\nconst emailItems = emailString.split(',')\n  .map(email => ({ id: email.trim() }));\n\n// 3. Define the Time Range (equivalent to your expressions)\n// Uses Luxon which is built into n8n's $now\nconst timeMin = $now.plus({ days: 1 }).setZone('America/New_York').set({ hour: 9, minute: 0, second: 0, millisecond: 0 }).toString();\nconst timeMax = $now.plus({ days: 3 }).setZone('America/New_York').set({ hour: 17, minute: 0, second: 0, millisecond: 0 }).toString();\n\n// 4. Build and return the final JSON structure\nreturn {\n  timeMin: timeMin,\n  timeMax: timeMax,\n  items: emailItems\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        1216
+      ],
+      "id": "0633c2a2-2f52-4c8f-a1fa-5945eb1c26f2",
+      "name": "Google Calendar JSON Input"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-pro",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-pro"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=### INPUT DATA\n{\n  \"search_starts\": \"{{ $json.timeMin }}\",\n  \"search_ends\": \"{{ $json.timeMax }}\",\n  \"busy_data\": {{ JSON.stringify($json.calendars) }}\n}"
+            }
+          ]
+        },
+        "options": {
+          "systemMessage": "### ROLE You are a Scheduling Logic Engine. Your task is to find the EARLIEST 30-minute availability window where ALL attendees are free.  ### INPUT STRUCTURE You will receive a JSON object with the following keys: - 'search_starts': The absolute earliest UTC timestamp to begin your search. - 'search_ends': The absolute latest UTC timestamp to end your search. - 'busy_data': An object containing attendee emails as keys, each with an array of 'busy' time blocks.  ### OFFICE HOUR CONSTRAINTS Within the search window, you must ONLY suggest slots that fall between 9:00 AM and 5:00 PM EST (Eastern Standard Time). - Note: EST is UTC-5. - 9:00 AM EST = 14:00 UTC - 5:00 PM EST = 22:00 UTC  ### CONSTRAINTS 1. DURATION: The slot must be exactly 30 minutes long. 2. EARLIEST: You must find the first available gap chronologically starting from 'search_starts'. 3. NO OVERLAP: A valid gap is one where NO attendee has a block in 'busy_data' that overlaps with the 30-minute window.  ### OUTPUT FORMAT Return strictly in this format: - **Selected Time**: [Day of Week], [Date] at [Start Time] - [End Time] EST. - **ISO Start**: [ISO Timestamp in UTC] - **ISO End**: [ISO Timestamp in UTC] - **Reasoning**: Explain why this was the earliest slot.",
+          "temperature": 0
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        3104,
+        1072
+      ],
+      "id": "e816643b-600a-4064-a192-7f2bf987c9db",
+      "name": "Find Earliest Calendar",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/freeBusy",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleCalendarOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2992,
+        1216
+      ],
+      "id": "560963db-d6fc-49ed-8459-e39ff3735c54",
+      "name": "Get Calendar Availability",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "9TNimfWzRE1vGDuA",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "codymasteriii@gmail.com",
+          "mode": "list",
+          "cachedResultName": "codymasteriii@gmail.com"
+        },
+        "start": "={{ $json.ISO_Start }}",
+        "end": "={{ $json.ISO_End }}",
+        "additionalFields": {
+          "attendees": [
+            "={{ $('Get Step4 Ticket').item.json.recipient_email }}"
+          ],
+          "description": "=This meeting is to review offers collected for {{ $('Carry Over Fields').item.json.curr_process }}. The proposal for best offer is available at {{ $('Store File Link').item.json.uploaded_file_link }}.\n\nReason for this slot, as suggested by AI assitant is:\n{{ $json.reasoning }}",
+          "sendUpdates": "all",
+          "summary": "={{ $('Carry Over Fields').item.json.curr_process }} Offer Review"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        3504,
+        1216
+      ],
+      "id": "5e95979d-9521-46ed-a771-a088d64591e5",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "9TNimfWzRE1vGDuA",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = \"{{ $json.name }}\"",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "webViewLink"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2080,
+        1072
+      ],
+      "id": "0d1b2d22-1219-4460-968c-884868329b6a",
+      "name": "Get Uploaded File Link",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "32e1d9ce-ba82-4524-9421-5ad3e4eb03d0",
+              "name": "uploaded_file_link",
+              "value": "={{ $json.webViewLink }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2240,
+        1072
+      ],
+      "id": "91ecfd27-929c-45dc-ab54-9ac417f7f56f",
+      "name": "Store File Link"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Get the text from the AI node\nconst aiText = $input.first().json.content.parts[0].text;\n\n// 2. Define Regex patterns to find the ISO strings\n// These look for the text following \"ISO Start: \" and \"ISO End: \"\nconst startMatch = aiText.match(/ISO Start\\*\\*:\\s*([^\\s\\n]+)/);\nconst endMatch = aiText.match(/ISO End\\*\\*:\\s*([^\\s\\n]+)/);\n\n// 3. Extract the values or return an error if not found\nconst isoStart = startMatch ? startMatch[1] : null;\nconst isoEnd = endMatch ? endMatch[1] : null;\n\nif (!isoStart || !isoEnd) {\n  throw new Error(\"Could not extract ISO timestamps from AI output.\");\n}\n\nreturn {\n  ISO_Start: isoStart,\n  ISO_End: isoEnd,\n  // Optional: Pass through the original reasoning for the calendar description\n  reasoning: aiText.split(\"**Reasoning**:\")[1]?.trim() || \"\"\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3344,
+        1216
+      ],
+      "id": "cc9aa234-0ca6-4d95-a80d-3c87b67245d8",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Get Step4 Ticket').item.json.key }}",
+        "updateFields": {
+          "statusId": {
+            "__rl": true,
+            "value": "41",
+            "mode": "list",
+            "cachedResultName": "Done"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        3664,
+        1216
+      ],
+      "id": "555eb336-8975-4941-b281-ffda0396c64c",
+      "name": "Complete Step4 Ticket",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "curr_process",
+              "keyValue": "={{ $('Parse Company Offers').item.json.curr_process }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "curr_process": "={{ $('Parse Company Offers').item.json.curr_process }}",
+            "curr_process_status": "pending_offer_review"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "curr_process",
+              "displayName": "curr_process",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "curr_process_status",
+              "displayName": "curr_process_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        816,
+        1216
+      ],
+      "id": "1f467814-2a38-411a-a493-348c7e7939f1",
+      "name": "Upsert Status pending_offer_review"
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "curr_process",
+              "keyValue": "={{ $('Carry Over Fields').item.json.curr_process }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "curr_process": "={{ $('Carry Over Fields').item.json.curr_process }}",
+            "curr_process_status": "pending_minutes"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "curr_process",
+              "displayName": "curr_process",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "curr_process_status",
+              "displayName": "curr_process_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        3824,
+        1216
+      ],
+      "id": "d6ab3b11-8d65-4a79-8a83-8f3f828c3d4b",
+      "name": "Upsert Status pending_minutes"
+    },
+    {
+      "parameters": {
+        "content": "Step 3&4. Jira archive tickets progress monitoring & AI analysis and meeting scheduling & meeting minute monitoring and archive workflow\n3.1. A scheduled trigger node runs to check what process name and status exists in the \"process_demo\". If no process name exists or status is not \"activated\", the scheduler does nothing\n3.2. Otherwise the scheduler gets activated to monitor if any Step2 Jira tickets are still with TO DO status\n3.3. If all Step2 tickets are DONE, go to the google drive (folder location is in the Step2 ticket) to get all the materials archived\n3.4. Set the process status in \"process_demo\" to be \"pending_offer_review\" (this will effectively deactivate the scheduler in the workflow)\n3.5. Perform a comparison analysis using AI to suggest the best price vs. functionality proposal, send the proposal to my email to review and approve\n3.6. If I approve, save the proposal in Google drive (stored in Step3 ticket) and mark Step 3 (perform analysis) Done\n4.1. Get emails stored in Step 4 (meeting prep), find the common calendar that works for all these email recipients and schedule a Google calendar event\n4.2. Mark Step4 as Done. Set \"process_demo\" process status to \"pending_minutes\"",
+        "height": 336,
+        "width": 784
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1248,
+        896
+      ],
+      "typeVersion": 1,
+      "id": "fee03bba-5b4d-4d94-bdf2-fbc83b1c1895",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Step 2. Gmail monitoring all incoming gmail emails workflow\n2.1. Activate a Gmail trigger to monitor incoming emails\n2.2. If process exists in \"process_demo\" and status is activated, extract process name like \"Q4 Process\" from email subject\n2.3. if active process name matches email process name, get Step1 child Jira tickets within the parent ticket whose summary field matches that process name\n2.4. If the sender matches to one of the emails stored in the Jira tickets and the Jira ticket's status is Awaiting Response\n2.5. Use AI to detect whether the email contains material (price vs. functionality) I requested or it's a question or status update email and then output \"submission\" or \"continuation\" response type\n2.6. If the type is submission, email me to remind me to review and sign off on the material, otherwise do nothing (I will need to deal with those \"continuation\" emails with the sender, this is the human-in-the-loop back-and-forth that cannot be automated)\n2.7. Once I signed off, update the Awaiting Response Step1 Jira ticket to be Done.\n2.8. Simultaneously, get the Step 2 ticket which contains the Google drive folder that I need to archive the email & attachment I just signed off\n2.9. After the archive is done, mark the corresponding Step 2 ticket to be Done",
+        "height": 352,
+        "width": 784
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1248,
+        256
+      ],
+      "typeVersion": 1,
+      "id": "6b3f3755-6cea-497f-83e3-70ca0ec10df4",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "Step 5. Meeting minutes monitoring workflow for Step 5 (last step of process)\n5.1. Activate a Gmail trigger to monitor incoming emails\n5.2. If process exists in \"process_demo\" and status is \"pending_minutes\", extract process name like \"Q4 Process\" from email subject\n5.3. if active process name matches email process name and this email is about meeting minutes, get Step5 Jira tickets within the parent ticket whose summary field matches that process name\n5.4. If the sender matches to one of the emails stored in the Jira tickets, fwd to me to review and sign off\n5.5. If I signed off, archive the meeting minutes and attachments in Google drive and mark Step5 (meeting minute collection) Done\n5.6. If I reject, continue with the Gmail trigger until a meeting minute is signed off\n5.7. Once Step5 is Done, update \"process_demo\" and mark process status to \"completed\"",
+        "height": 240,
+        "width": 768
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1200,
+        1552
+      ],
+      "typeVersion": 1,
+      "id": "c73b532a-b2f3-46ee-8dfe-38f9d617de4c",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "sender": "*@gmail.com"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1184,
+        1824
+      ],
+      "id": "9833f6ac-cd54-4960-8e90-2cfb37377275",
+      "name": "Gmail Trigger1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "condition": "neq",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -1008,
+        1824
+      ],
+      "id": "c4e30ce6-63ff-4aa1-8b87-d107f306ec5c",
+      "name": "Find Active Process2",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the items coming from the previous node\nconst items = $input.all();\n\nconst data = items[0].json;\n  \nreturn {\n  process_name: data.curr_process,\n  status: data.curr_process_status\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -832,
+        1824
+      ],
+      "id": "36edf6f0-c08f-417b-af58-480ea9cf905a",
+      "name": "Parse Process & Status2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Extract the subject from the Gmail Trigger\nconst subject = $('Gmail Trigger1').first().json.subject;\n\n// 2. Check if the subject contains \"Meeting Minutes\" (case-sensitive)\n// If you want it to be case-insensitive, use subject.toLowerCase().includes(\"meeting minutes\")\nif (subject.toLowerCase().includes(\"meeting minutes\")) {\n  \n  // 3. Regex matches \"Q\" followed by a digit and then \" Process\"\n  const regex = /Q\\d Process/;\n  const match = subject.match(regex);\n\n  // 4. Return the result if \"Meeting Minutes\" is found\n  return [{\n    json: {\n      result: match ? match[0] : \"No match found\"\n    }\n  }];\n}\n\n// 5. If \"Meeting Minutes\" is NOT in the subject, return nothing (stops the workflow)\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        2000
+      ],
+      "id": "8ddafd65-ddbc-4a71-8b84-0745f5a7ad5d",
+      "name": "Extract Process Name from Email1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "768522e3-a6a5-4ac5-9c2d-a94044757e56",
+              "leftValue": "={{ $json.result }}",
+              "rightValue": "={{ $('Pending Minutes?').item.json.process_name }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -368,
+        2000
+      ],
+      "id": "02bfb221-98de-4e4e-8f99-9ecdc04cb0ca",
+      "name": "Process in Email Match Active Process?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d3baf30c-d550-460d-9ec8-020e47d00d7d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "pending_minutes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -656,
+        1824
+      ],
+      "id": "9757af96-15d9-46c9-859e-b79db7e41ad3",
+      "name": "Pending Minutes?"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "parent_filter": "={{ $json.result }}",
+            "child_filter": "Step5",
+            "ticket_status": "TO DO"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -256,
+        1824
+      ],
+      "id": "fd2ecfc1-5420-4cff-b825-1f9836b8b589",
+      "name": "Get Step5 Ticket"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "768522e3-a6a5-4ac5-9c2d-a94044757e56",
+              "leftValue": "={{ $json.recipient_email }}",
+              "rightValue": "={{ $('Gmail Trigger1').item.json.from.value[0].address }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": true
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -96,
+        1824
+      ],
+      "id": "1edf5dc9-bc00-497b-b2ba-5394f820cb5b",
+      "name": "Email Sender Match Ticket?"
+    },
+    {
+      "parameters": {
+        "sendTo": "codymasteriii@gmail.com",
+        "subject": "={{ \"Fwd: \" + $('Gmail Trigger1').item.json.subject }}",
+        "message": "=<p>Meeting minutes for {{ $('Process in Email Match Active Process?1').item.json.result }} is received from <{{ $('Gmail Trigger1').item.json.to.value[0].address }}>.</p>\n<p><strong>It is ready for your final decision to:</p>\n<div style=\"margin-top: 20px;\">\n<a href=\"{{ $execution.resumeUrl }}/review?action=approve&key={{ $('Get Step5 Ticket').item.json.key }}\" style=\"background-color: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-right: 10px;\">Approve & Archive</a><a href=\"{{ $execution.resumeUrl }}/review?action=reject\" style=\"background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;\">Reject</a>\n</div>\n<br>\n<p><strong>Original email below:</p>\n<p>{{ $('Gmail Trigger1').item.json.html }}</p>\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        64,
+        1808
+      ],
+      "id": "0a7c07dd-7438-4a32-a696-52ba83dd5221",
+      "name": "Email Me to Review1",
+      "webhookId": "ff39ae2e-3a44-4ebf-bdef-8ec8f8083c8e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "responseMode": "responseNode",
+        "limitWaitTime": true,
+        "resumeUnit": "days",
+        "options": {
+          "webhookSuffix": "review"
+        }
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        1808
+      ],
+      "id": "001d9ac8-dac4-4e2d-a6d8-c47385cd57f2",
+      "name": "Wait2",
+      "webhookId": "7b4ff110-8284-4e90-8030-76368a33b4dd"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c8af0d2f-7e6b-479f-a72c-2da06a2665fb",
+              "leftValue": "={{ $json.query.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        384,
+        1808
+      ],
+      "id": "3948f833-6c86-4c9f-b6a1-8c6a55f854e1",
+      "name": "Minutes Approved?"
+    },
+    {
+      "parameters": {
+        "html_content": "={{ $json.email_body }}",
+        "output_format": "file",
+        "output_filename": "={{ $json.minutes_file_name }}"
+      },
+      "type": "n8n-nodes-htmlcsstopdf.htmlcsstopdf",
+      "typeVersion": 1,
+      "position": [
+        704,
+        1664
+      ],
+      "id": "6ee42e23-2b3a-4808-abd2-724a1c009e3d",
+      "name": "HTML to PDF2",
+      "credentials": {
+        "htmlcsstopdfApi": {
+          "id": "M5bFtkmr2TzuKgkp",
+          "name": "HTML to PDF account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "=<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Pending Meeting Minutes Review and Archive Completed</h1>\n    <h2>Jira Status Update</h2>\n    <p>{{ $('Bring Fields Fwd').item.json.key }}</p>\n    <h2>Google Drive File Uploaded</h2>\n    <p>{{ $('Bring Fields Fwd').item.json.minutes_file_name }}</p>\n    <br>\n    <h1>Overall {{ $('Bring Fields Fwd').item.json.curr_process }} Completed</h1>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1344,
+        1664
+      ],
+      "id": "710b02a2-634a-4230-9646-5746f3bd7396",
+      "name": "Respond to Webhook4"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "<!DOCTYPE html>\n\n<html>\n<head>\n  <meta charset=\"UTF-8\" />\n  <title>My HTML document</title>\n</head>\n<body>\n  <div class=\"container\">\n    <h1>Meeting Minutes Review Rejected</h1>\n  </div>\n</body>\n</html>\n\n<style>\n.container {\n  background-color: #ffffff;\n  text-align: center;\n  padding: 16px;\n  border-radius: 8px;\n}\n\nh1 {\n  color: #ff6d5a;\n  font-size: 24px;\n  font-weight: bold;\n  padding: 8px;\n}\n\nh2 {\n  color: #909399;\n  font-size: 18px;\n  font-weight: bold;\n  padding: 8px;\n}\n</style>\n",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        544,
+        1952
+      ],
+      "id": "1b4452ce-b407-412a-ae32-16b6f83ca8b5",
+      "name": "Respond to Webhook5"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "8ed0ef70-e8f4-44d5-97f3-57e67724c0f2",
+              "name": "key",
+              "value": "={{ $('Get Step5 Ticket').item.json.key }}",
+              "type": "string"
+            },
+            {
+              "id": "7220cd14-d734-49c8-9273-641930ac610e",
+              "name": "email_body",
+              "value": "={{ $('Gmail Trigger1').item.json.html }}",
+              "type": "string"
+            },
+            {
+              "id": "daa73f2e-24a0-41cd-89cf-fa355c902f93",
+              "name": "archive_folder",
+              "value": "={{ $('Get Step5 Ticket').item.json.archive_folder }}",
+              "type": "string"
+            },
+            {
+              "id": "c75727d2-0c04-4393-a977-c5c5a5743ec4",
+              "name": "minutes_file_name",
+              "value": "={{ $('Extract Process Name from Email1').item.json.result.replace(/\\s+/g, '_') }}_Minutes",
+              "type": "string"
+            },
+            {
+              "id": "55427f49-3d48-4368-9cec-b567f21e1dc1",
+              "name": "curr_process",
+              "value": "={{ $('Extract Process Name from Email1').item.json.result }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        544,
+        1664
+      ],
+      "id": "5d3afdf6-b31c-43f8-b4a7-6e6b9bc4653f",
+      "name": "Bring Fields Fwd"
+    },
+    {
+      "parameters": {
+        "name": "={{ $binary.data.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive",
+          "cachedResultUrl": "https://drive.google.com/drive/my-drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Bring Fields Fwd').item.json.archive_folder }}",
+          "mode": "id"
+        },
+        "options": {
+          "simplifyOutput": true
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        864,
+        1664
+      ],
+      "id": "0544b626-bed8-482f-a8a6-bcd1d4bdbe18",
+      "name": "Upload Minutes",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "HUDdG0R9aIXSdzGI",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Bring Fields Fwd').item.json.key }}",
+        "updateFields": {
+          "statusId": {
+            "__rl": true,
+            "value": "41",
+            "mode": "list",
+            "cachedResultName": "Done"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        1664
+      ],
+      "id": "d61f5b8c-fb74-4c2b-9c37-b635804aaf18",
+      "name": "Complete Step5 Ticket",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "curr_process",
+              "keyValue": "={{ $('Bring Fields Fwd').item.json.curr_process }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "curr_process": "={{ $('Bring Fields Fwd').item.json.curr_process }}",
+            "curr_process_status": "completed"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "curr_process",
+              "displayName": "curr_process",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "curr_process_status",
+              "displayName": "curr_process_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        1664
+      ],
+      "id": "d2fa7de3-7c54-4083-a0d6-362026976ef0",
+      "name": "Upsert Status completed"
+    },
+    {
+      "parameters": {
+        "content": "Step 1. User command to start process and email product suppliers for quarterly price quote workflow\n1.1. User enter command like \"start Q4 Process\"\n1.2. AI agent parses user command, sets \"process_demo\" with process name and status to \"activated\"\n1.3. Get all Step1 TO DO child Jira tickets that belong to the \"Q4 Process\", loop through each ticket:\n1.3.1. Have AI generate a request for quote email request with deadline (based on the ticket's \"description\" and \"deadline\" field as context)\n1.3.2. Send the email request to the ticket's recipient_email field\n1.3.3. Mark the Jira ticket's status to AWAITING RESPONSE, set the last_chase_date to current timestamp\n",
+        "height": 192,
+        "width": 800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1232,
+        -816
+      ],
+      "typeVersion": 1,
+      "id": "9612be99-4bfd-4c75-8e78-27bf44952d52",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $json.query.key }}",
+        "updateFields": {
+          "statusId": {
+            "__rl": true,
+            "value": "41",
+            "mode": "list",
+            "cachedResultName": "Done"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        784
+      ],
+      "id": "ce0098cd-5e66-43ec-a493-ae95b7c7535d",
+      "name": "Complete Step1 Ticket",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1152,
+        48
+      ],
+      "id": "947f68db-7bc7-4114-bbf1-a94c14c31e94",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "hjMvxJWlme62tIMJ",
+          "mode": "list",
+          "cachedResultName": "process_demo",
+          "cachedResultUrl": "/projects/iVR1EfXxxtxsOIPN/datatables/hjMvxJWlme62tIMJ"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "condition": "neq",
+              "keyValue": "0"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        -976,
+        48
+      ],
+      "id": "3a124f97-d8e8-4dcf-8572-2a416941e64a",
+      "name": "Find Active Process3",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the items coming from the previous node\nconst items = $input.all();\n\nconst data = items[0].json;\n  \nreturn {\n  process_name: data.curr_process,\n  status: data.curr_process_status\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        48
+      ],
+      "id": "164731c9-dc60-42d2-ab00-8fd992cc0eb5",
+      "name": "Parse Process & Status3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d3baf30c-d550-460d-9ec8-020e47d00d7d",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "activated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        48
+      ],
+      "id": "126d9d06-258d-474f-b1cf-d41701b2c12e",
+      "name": "Process Active?2"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step1",
+            "parent_filter": "={{ $json.process_name }}",
+            "ticket_status": "AWAITING RESPONSE"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -432,
+        32
+      ],
+      "id": "066e9fa6-fc92-4b79-aca2-e61ade74fea7",
+      "name": "Find Step1 Awaiting Response Tickets"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -256,
+        32
+      ],
+      "id": "514b646c-a827-46e3-b4a4-19c956e728ea",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "receivedAfter": "={{ $json.last_chase_date }}",
+          "sender": "={{ $json.recipient_email }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -64,
+        48
+      ],
+      "id": "40460380-2603-46a5-bdab-a8a399064b78",
+      "name": "Find Email Since Last Chase",
+      "webhookId": "60446ddc-8a92-481b-a98c-aa43e2058902",
+      "alwaysOutputData": true,
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6150436e-8198-47c5-9525-a16f770ead0d",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        96,
+        48
+      ],
+      "id": "3600d7da-6100-48a4-b629-1fa373f38e77",
+      "name": "New Email Received?"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Loop Over Items').item.json.key }}",
+        "updateFields": {
+          "customFieldsUi": {
+            "customFieldsValues": [
+              {
+                "fieldId": {
+                  "__rl": true,
+                  "value": "customfield_10043",
+                  "mode": "id"
+                },
+                "fieldValue": "={{ $now.toFormat(\"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\") }}"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        864,
+        80
+      ],
+      "id": "daefc2d5-eac7-4b7b-b396-13b1cb6f09e9",
+      "name": "Update Last Chase Date",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "921364cc-5e24-4a70-8179-fa70fb379003",
+              "leftValue": "={{ DateTime.now() }}",
+              "rightValue": "={{ DateTime.fromISO($('Loop Over Items').item.json.deadline) }}",
+              "operator": {
+                "type": "dateTime",
+                "operation": "after"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        256,
+        64
+      ],
+      "id": "9489a4bd-2e01-4154-ade9-4ffe657eca5f",
+      "name": "PastDue?"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Generate a firm and urgent follow-up email as a strictly formatted JSON object.\n\nContext: The supplier has failed to provide the {{ $('Parse Process & Status3').item.json.process_name }} price quote by the agreed deadline.\nRecipient: {{ $('Loop Over Items').item.json.recipient_email }}\nMissed Deadline: {{ $('Loop Over Items').item.json.deadline }}\nTone: Firm, demanding, and urgent. Express disappointment about the missed deadline and request an update within 24 hours.\nSender Name: CodyMasterAI\n\nConstraints:\nDo not use placeholders like [Your Name].\nUse 'Hi there,' as the greeting if the recipient name is not clear or is just an email address.\nReturn ONLY a JSON object with two keys: 'subject' and 'body'.\nDo not include any introductory text or markdown code blocks like ```json.\n"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        416,
+        0
+      ],
+      "id": "6682bc3e-027e-4760-b636-29f909d03fc5",
+      "name": "Demanding Chaser",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Generate a professional follow-up email as a strictly formatted JSON object.\n\nContext: Checking with the supplier for the latest price quote for the {{ $('Parse Process & Status3').item.json.process_name }}.\nRecipient: {{ $('Loop Over Items').item.json.recipient_email }}\nDeadline: {{ $('Loop Over Items').item.json.deadline }}\nTone: Soft, polite, and professional.\nSender Name: CodyMasterAI\n\nConstraints:\nDo not use placeholders like [Your Name].\nUse 'Hi there,' as the greeting if the recipient name is not clear or is just an email address.\nReturn ONLY a JSON object with two keys: 'subject' and 'body'.\nDo not include any introductory text or markdown code blocks like ```json.\n"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        416,
+        128
+      ],
+      "id": "0f36620a-473e-42c0-b6e7-29b3f3f33e0d",
+      "name": "Soft Reminder Chaser",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Loop Over Items').item.json.recipient_email }}",
+        "subject": "={{ JSON.parse($json.content.parts[0].text).subject }}",
+        "emailType": "text",
+        "message": "={{ JSON.parse($json.content.parts[0].text).body }}",
+        "options": {
+          "ccList": "codymasteriii@gmail.com"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        704,
+        0
+      ],
+      "id": "d6bcd817-0295-48b0-baa9-1cb0f7b3af02",
+      "name": "Send a message1",
+      "webhookId": "f39093ed-d51b-4721-94ab-ea8bc31878b4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Loop Over Items').item.json.recipient_email }}",
+        "subject": "={{ JSON.parse($json.content.parts[0].text).subject }}",
+        "emailType": "text",
+        "message": "={{ JSON.parse($json.content.parts[0].text).body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        704,
+        128
+      ],
+      "id": "f73e7cc2-c0b4-4d73-bb16-bd3cfd98bcc3",
+      "name": "Send a message2",
+      "webhookId": "b4544840-af4a-4693-8e5f-40651244031c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "=## Role\nYou are a Process Controller Agent. Your job is to parse user commands and activate the \"Activate Process\" tool with the correct parameters.\n\n## Task\n1. Analyze the user input to identify a \"Process Name\" (e.g., \"Q4 Process\", \"Q2 Process\").\n2. Determine the user's intent:\n   - \"activated\": Phrases like \"start\", \"begin\", \"initiate\", \"run\", \"kick off\".\n   - \"completed\": Phrases like \"end\", \"stop\", \"finish\", \"done\", \"close\", \"complete\".\n3. Use the \"Activate Process\" tool to log this action.\n\n## Parameters for Tool\n- **curr_process**: The name of the process found in the input (e.g., \"Q4 Process\").\n- **curr_process_status**: Must be exactly \"activated\" or \"completed\" based on your analysis.\n\n## Constraints\n- If the user input is ambiguous or missing a process name, ask for clarification.\n- Do not guess process names if they are not provided.\n- Once the tool call is successful, respond with a confirmation in this exact format:     \"**Process** [curr_process] has been successfully set to [curr_process_status].\"\n- Do not confirm the action until the tool has actually finished running.\n",
+          "maxIterations": 5
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        -992,
+        -592
+      ],
+      "id": "603579fc-16a2-4772-aab2-ab63a7270a56",
+      "name": "Activate Process1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the output text from the AI Agent\nconst text = $input.first().json.output; \n\n// This Regex looks for text between \"Process \" and \" has been\"\nconst regex = /\\*\\*Process\\*\\* (.*?) has been/;\nconst match = text.match(regex);\n\nreturn {\n  curr_process: match ? match[1] : \"Not Found\"\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        -592
+      ],
+      "id": "315dbed7-d363-4ba0-812e-6efcdaa75362",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "4XJ3uhFcsqtjBwXO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/4XJ3uhFcsqtjBwXO",
+          "cachedResultName": "Jira-Child"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "child_filter": "Step1",
+            "parent_filter": "={{ $json.curr_process }}",
+            "ticket_status": "TO DO"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "child_filter",
+              "displayName": "child_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "parent_filter",
+              "displayName": "parent_filter",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "ticket_status",
+              "displayName": "ticket_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -512,
+        -592
+      ],
+      "id": "0086f3cf-45ba-4380-9701-c05bd4c339da",
+      "name": "Find Step1 TODO Tickets"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -336,
+        -592
+      ],
+      "id": "d9f8fb04-349a-4102-8ae7-0a06222e243f",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "models/gemini-2.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=# Role\nYou are a Procurement Specialist. Your task is to generate professional correspondence for product suppliers as a strictly formatted JSON object.\n\n# Context & Logic\n- **Task Description:** {{ $('Loop Over Items1').item.json.description }}\n- **Recipient Email:** {{ $('Loop Over Items1').item.json.recipient_email }}\n- **Technical Deadline:** {{ $('Loop Over Items1').item.json.deadline }}\n\n# Task Instructions\n- **Goal:** Generate a Request for Quote (RFQ) email based on the \"Task Description\".\n- **Tone:** Professional, clear, and collaborative.\n- **Data Parsing:**\n    1. Identify the specific items, the \"Why\" (reason for request), and the required format (Excel/CSV) from the Description.\n    2. Look for an 'Addressed To' name in the description. If found, use it in the greeting (e.g., 'Dear ABC Co Team,'). If not found, use 'Hi there,'.\n- **Deadline Formatting:** Convert the Technical Deadline into a human-readable format (e.g., \"December 31, 2025\").\n\n# Constraints\n- **Output Format:** Return ONLY a raw JSON object with exactly two keys: \"subject\" and \"body\".\n- **Strict Silence:** Do not include markdown code blocks (```json), no preamble, no \"Here is the email,\" and no closing remarks outside the JSON.\n- **No Placeholders:** Do not use bracketed text like [Insert Name]. Use only the data provided or generic professional language.\n- **Sender Signature:** Sign off as \"CodyMasterAI\".\n\n# Subject Line Pattern\nGenerate a professional subject line following this pattern: \"Request for Quote: [Short Item Summary] - Response Needed by [Formatted Date]\""
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [
+        -144,
+        -576
+      ],
+      "id": "718c0c73-7ab5-4060-aa35-83c33a144170",
+      "name": "Generate RFQ Email",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ImTcg33DXxnMmWFa",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Loop Over Items1').item.json.recipient_email }}",
+        "subject": "={{ JSON.parse($json.content.parts[0].text).subject }}",
+        "emailType": "text",
+        "message": "={{ JSON.parse($json.content.parts[0].text).body }}",
+        "options": {
+          "ccList": "codymasteriii@gmail.com"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        144,
+        -576
+      ],
+      "id": "8e20b127-0cc9-458e-9099-237f0f7b0445",
+      "name": "Send a message3",
+      "webhookId": "f39093ed-d51b-4721-94ab-ea8bc31878b4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "MAVmTiVAiN2c6jwT",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "issueKey": "={{ $('Loop Over Items1').item.json.key }}",
+        "updateFields": {
+          "customFieldsUi": {
+            "customFieldsValues": [
+              {
+                "fieldId": {
+                  "__rl": true,
+                  "value": "customfield_10043",
+                  "mode": "id"
+                },
+                "fieldValue": "={{ $now.toFormat(\"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\") }}"
+              }
+            ]
+          },
+          "statusId": {
+            "__rl": true,
+            "value": "2",
+            "mode": "list",
+            "cachedResultName": "Awaiting Response"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        304,
+        -576
+      ],
+      "id": "2139f247-6e62-43af-9249-0db0e632467e",
+      "name": "Update an issue",
+      "credentials": {
+        "jiraSoftwareCloudApi": {
+          "id": "i8pqNIwkDVp2hKlo",
+          "name": "Jira SW Cloud account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Activate Process1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find Active Process1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Submission Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Pending Sender's Ticket": {
+      "main": [
+        [
+          {
+            "node": "Check if Email is a Submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Email is a Submission": {
+      "main": [
+        [
+          {
+            "node": "Is Submission?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bring Gmail Attachment Fwd": {
+      "main": [
+        [
+          {
+            "node": "Email Me to Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Me to Review": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Response Tickets for Process": {
+      "main": [
+        [
+          {
+            "node": "Find Pending Sender's Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Archive Tickets for Process": {
+      "main": [
+        [
+          {
+            "node": "Get Key-Folder-Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bring Process &Email Fwd": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Archive Tickets for Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Key-Folder-Attachment": {
+      "main": [
+        [
+          {
+            "node": "HTML to PDF",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload Attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML to PDF": {
+      "main": [
+        [
+          {
+            "node": "Upload Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Email": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Attachment": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Complete Step2 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Activate Process1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Find Active Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Active Process": {
+      "main": [
+        [
+          {
+            "node": "Parse Process & Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Process & Status": {
+      "main": [
+        [
+          {
+            "node": "Process Active?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Submission?": {
+      "main": [
+        [
+          {
+            "node": "Bring Gmail Attachment Fwd",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Active?": {
+      "main": [
+        [
+          {
+            "node": "Find Step2 Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Step2 Tickets": {
+      "main": [
+        [
+          {
+            "node": "Check Step2 All Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parse Company Offers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Active Process1": {
+      "main": [
+        [
+          {
+            "node": "Parse Process & Status1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Process & Status1": {
+      "main": [
+        [
+          {
+            "node": "Process Active?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Active?1": {
+      "main": [
+        [
+          {
+            "node": "Extract Process Name from Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Process Name from Email": {
+      "main": [
+        [
+          {
+            "node": "Process in Email Match Active Process?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process in Email Match Active Process?": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Response Tickets for Process",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Step2 All Done": {
+      "main": [
+        [
+          {
+            "node": "Find Step2 Excels Archived",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Step2 Excels Archived": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Company Offers": {
+      "main": [
+        [
+          {
+            "node": "Perform Offer Comparison",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate Process": {
+      "ai_tool": [
+        [
+          {
+            "node": "Activate Process1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Best Offer Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Step3 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Carry Over Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML to PDF1": {
+      "main": [
+        [
+          {
+            "node": "Upload Offer Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Step2 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Offer Proposal": {
+      "main": [
+        [
+          {
+            "node": "Get Uploaded File Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set HTML & File Input": {
+      "main": [
+        [
+          {
+            "node": "Upsert Status pending_offer_review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry Over Fields": {
+      "main": [
+        [
+          {
+            "node": "HTML to PDF1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Perform Offer Comparison": {
+      "main": [
+        [
+          {
+            "node": "Set HTML & File Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Step3 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submission Approved?": {
+      "main": [
+        [
+          {
+            "node": "Complete Step1 Ticket",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Bring Process &Email Fwd",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Best Offer Approved?": {
+      "main": [
+        [
+          {
+            "node": "Get Step3 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Step4 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar JSON Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar JSON Input": {
+      "main": [
+        [
+          {
+            "node": "Get Calendar Availability",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook3": {
+      "main": [
+        [
+          {
+            "node": "Get Step4 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Calendar Availability": {
+      "main": [
+        [
+          {
+            "node": "Find Earliest Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Uploaded File Link": {
+      "main": [
+        [
+          {
+            "node": "Store File Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store File Link": {
+      "main": [
+        [
+          {
+            "node": "Complete Step3 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Earliest Calendar": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Complete Step4 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Step4 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Upsert Status pending_minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Status pending_offer_review": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Find Active Process2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Active Process2": {
+      "main": [
+        [
+          {
+            "node": "Parse Process & Status2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Process & Status2": {
+      "main": [
+        [
+          {
+            "node": "Pending Minutes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Process Name from Email1": {
+      "main": [
+        [
+          {
+            "node": "Process in Email Match Active Process?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process in Email Match Active Process?1": {
+      "main": [
+        [
+          {
+            "node": "Get Step5 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pending Minutes?": {
+      "main": [
+        [
+          {
+            "node": "Extract Process Name from Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Step5 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Email Sender Match Ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Sender Match Ticket?": {
+      "main": [
+        [
+          {
+            "node": "Email Me to Review1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Minutes Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Me to Review1": {
+      "main": [
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML to PDF2": {
+      "main": [
+        [
+          {
+            "node": "Upload Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Minutes Approved?": {
+      "main": [
+        [
+          {
+            "node": "Bring Fields Fwd",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bring Fields Fwd": {
+      "main": [
+        [
+          {
+            "node": "HTML to PDF2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Minutes": {
+      "main": [
+        [
+          {
+            "node": "Complete Step5 Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Step5 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Upsert Status completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Status completed": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Complete Step1 Ticket": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find Active Process3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Active Process3": {
+      "main": [
+        [
+          {
+            "node": "Parse Process & Status3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Process & Status3": {
+      "main": [
+        [
+          {
+            "node": "Process Active?2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Active?2": {
+      "main": [
+        [
+          {
+            "node": "Find Step1 Awaiting Response Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Step1 Awaiting Response Tickets": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Find Email Since Last Chase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Email Since Last Chase": {
+      "main": [
+        [
+          {
+            "node": "New Email Received?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Email Received?": {
+      "main": [
+        [
+          {
+            "node": "Update Last Chase Date",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "PastDue?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Last Chase Date": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PastDue?": {
+      "main": [
+        [
+          {
+            "node": "Demanding Chaser",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Soft Reminder Chaser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demanding Chaser": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Soft Reminder Chaser": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        [
+          {
+            "node": "Update Last Chase Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message2": {
+      "main": [
+        [
+          {
+            "node": "Update Last Chase Date",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Activate Process1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Find Step1 TODO Tickets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Step1 TODO Tickets": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Generate RFQ Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate RFQ Email": {
+      "main": [
+        [
+          {
+            "node": "Send a message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message3": {
+      "main": [
+        [
+          {
+            "node": "Update an issue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update an issue": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "c1b2d7c3-c7a9-4818-aff6-43d1968b02c6",
+  "meta": {
+    "templateId": "ready-to-run-ai-workflow-v4",
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e7c260f21e76c6e244587a9b9f44f139839ab96524b5135ec8e14b5aa3e1c353"
+  },
+  "id": "eq8TeoJNc4MVzIIX",
+  "tags": []
+}
